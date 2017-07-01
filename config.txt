@@ -1,0 +1,3 @@
+tamanho.vetor=400
+servidores.ordenacao=
+servidores.merge=
