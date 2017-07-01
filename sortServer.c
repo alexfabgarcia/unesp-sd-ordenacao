@@ -3,10 +3,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
+#include <unistd.h> // defines POSIX constants
 #include <sys/types.h>
 #include <sys/socket.h>
-#include <netinet/in.h>
+#include <netinet/in.h> // defines IP standard protocols
+#include <arpa/inet.h> // to convert host addresses
 
 #define BUFFER_SIZE 1024
 #define TRUE 1
@@ -62,8 +63,8 @@ int main(int argc, char *argv[]) {
     while (TRUE) {
         clilen = sizeof(struct sockaddr_in);
         newsockfd = accept(sockfd, (struct sockaddr *) &cli_addr, &clilen);
-        // inet_ntoa(cli_addr.sin_addr)
-        printf("\nRecebendo conexão de (%s , %d)", "IP", ntohs(cli_addr.sin_port));
+
+        printf("\nRecebendo conexão de (%s , %d)", inet_ntoa(cli_addr.sin_addr), ntohs(cli_addr.sin_port));
 
         while (TRUE) {
             printf("\nEnvie (q ou Q para sair) : ");

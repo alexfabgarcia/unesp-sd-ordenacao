@@ -11,7 +11,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "ruwindows.h"
 
 #define TAMANHO_MIN_VETOR 64
 #define TAMANHO_MAX_VETOR 1600
