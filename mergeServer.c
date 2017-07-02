@@ -31,31 +31,6 @@ void error(const char *msg) {
     exitWithFailure();
 }
 
-void swap(int *xp, int *yp) {
-    int temp = *xp;
-    *xp = *yp;
-    *yp = temp;
-}
-
-// An optimized version of Bubble Sort
-void bubbleSort(int arr[], int n) {
-    int i, j;
-    bool swapped;
-    for (i = 0; i < n - 1; i++) {
-        swapped = false;
-        for (j = 0; j < n - i - 1; j++) {
-            if (arr[j] > arr[j + 1]) {
-                swap(&arr[j], &arr[j + 1]);
-                swapped = true;
-            }
-        }
-
-        // IF no two elements were swapped by inner loop, then break
-        if (swapped == false)
-            break;
-    }
-}
-
 int receberVetor(int clientsockfd, int **vetor) {
     int tamanhoVetor, bytes_transfer;
     int ok = 1, erro = 0;
@@ -109,10 +84,26 @@ void enviarVetor(int clientsockfd, int **vetor, int tamanhoVetor) {
     }
 }
 
+int *mergeVetoresOrdenados(int *vetorA, int sizeA, int *vetorB, int sizeB) {
+    int size = sizeA + sizeB;
+    int posA = 0, posB = 0;
+    int *vetorFinal = malloc((sizeA + sizeB) * sizeof(int));
+
+    for (int i = 0; i < size; i++) {
+        if (vetorA[posA] < vetorB[posB]) {
+            vetorFinal[i] = vetorA[posA++];
+        } else {
+            vetorFinal[i] = vetorA[posB++];
+        }
+    }
+
+    return vetorFinal;
+}
+
 int main(int argc, char *argv[]) {
     int sockfd, newsockfd, porta, bytes_transfer;
-    int *vetor;
-    int tamanhoVetor;
+    int *vetorA, *vetorB, *vetorFinal;
+    int tamanhoVetorA, tamanhoVetorB;
     int ok = 1, erro = 0;
     socklen_t clilen;
     char buffer[BUFFER_SIZE];
@@ -149,7 +140,7 @@ int main(int argc, char *argv[]) {
     }
 
     while (TRUE) {
-        printf("\nServidor de ordenacao esperando por cliente na porta %d (...)\n", porta);
+        printf("\nServidor de merge esperando por cliente na porta %d (...)\n", porta);
         fflush(stdout);
 
         clilen = sizeof(struct sockaddr_in);
@@ -157,17 +148,15 @@ int main(int argc, char *argv[]) {
 
         printf("\nRecebendo conexão de (%s, %d)\n", inet_ntoa(cli_addr.sin_addr), ntohs(cli_addr.sin_port));
 
-        tamanhoVetor = receberVetor(newsockfd, &vetor);
+        puts("Recebendo primeiro vetor...");
+        tamanhoVetorA = receberVetor(newsockfd, &vetorA);
 
-        if (vetor != NULL) {
-            puts("\nIniciando ordenacao do vetor...");
-            bubbleSort(vetor, tamanhoVetor);
+        puts("Recebendo segundo vetor...");
+        tamanhoVetorB = receberVetor(newsockfd, &vetorB);
 
-            puts("Vetor ordenado:");
-            printArray(vetor, tamanhoVetor);
+        vetorFinal = mergeVetoresOrdenados(vetorA, tamanhoVetorA, vetorB, tamanhoVetorB);
 
-            enviarVetor(newsockfd, &vetor, tamanhoVetor);
-        }
+        enviarVetor(newsockfd, &vetorFinal, tamanhoVetorA + tamanhoVetorB);
 
         close(newsockfd);
     }
