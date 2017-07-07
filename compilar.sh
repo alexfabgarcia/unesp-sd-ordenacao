@@ -1,0 +1,1 @@
+gcc common.c sortServer.c -o sortServer

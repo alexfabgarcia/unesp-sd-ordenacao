@@ -17,13 +17,16 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <netdb.h>
+#include <semaphore.h>
+#include <pthread.h>
 
 /**
  * Constantes.
  */
 #define TAMANHO_PARTICAO_VETOR 32;
 #define TAMANHO_MIN_VETOR 64
-#define TAMANHO_MAX_VETOR 1600
+#define TAMANHO_MAX_VETOR 160000
+#define BUFFER_SIZE 1024
 #define LENGTH_PROP_SERVER_ORD strlen("servidores.ordenacao")
 #define LENGTH_PROP_SERVER_MERGE strlen("servidores.merge")
 #define DELIMITADOR_SERVIDORES ";"
@@ -86,11 +89,14 @@ int conectarServidor(char *ip, int port) {
         error("ERROR connecting");
     }
 
-    puts("Conectado ao servidor.");
+    printf("Conectado ao servidor %s:%d.\n", ip, port);
 
     return sockfd;
 }
 
+int posicoesVetor(int size, int posicao_atual) {
+    return ((size < BUFFER_SIZE) || (posicao_atual + BUFFER_SIZE) > size) ? size - posicao_atual : BUFFER_SIZE;
+}
 
 void enviarVetor(int sockfd, int **vetor, int size) {
     int controle, bytes_transfer;
@@ -111,10 +117,18 @@ void enviarVetor(int sockfd, int **vetor, int size) {
         puts("Tamaho do vetor recebido pelo servidor.");
 
         puts("Enviando vetor: ");
-        bytes_transfer = write(sockfd, *vetor, size * sizeof(int));
+        for (int i = 0; i < size; i += BUFFER_SIZE) {
 
-        if (bytes_transfer < 0) {
-            error("Erro ao enviar vetor.");
+            // Calcula a quantidade para transferir
+            bytes_transfer = posicoesVetor(size, i);
+
+            printf("Enviando posicoes de %d a %d.\n", i, i + bytes_transfer);
+            bytes_transfer = write(sockfd, *vetor + i, bytes_transfer * sizeof(int));
+
+            if (bytes_transfer < 0) {
+                error("Erro ao enviar vetor.");
+                return;
+            }
         }
 
         puts("Aguardando confirmacao de recebimento do vetor.");
@@ -130,14 +144,23 @@ void enviarVetor(int sockfd, int **vetor, int size) {
 }
 
 void receberVetor(int sockfd, int **vetor, int size) {
-    int bytes_transfer = read(sockfd, *vetor, size * sizeof(int));
+    int bytes_transfer;
 
-    if (bytes_transfer < 0) {
-        puts("Nao foi possivel receber o vetor ordenado.");
-    } else {
-        puts("Vetor ordenado recebido.");
-        printArray(*vetor, size);
+    for (int i = 0; i < size; i += BUFFER_SIZE) {
+        bytes_transfer = posicoesVetor(size, i);
+
+        printf("Recebendo posicoes de %d a %d.\n", i, i + bytes_transfer);
+        bytes_transfer = read(sockfd, *vetor + i, bytes_transfer * sizeof(int));
+
+        if (bytes_transfer < 0) {
+            printf("Nao foi possivel receber o vetor ordenado.");
+            *vetor = NULL;
+            return;
+        }
     }
+
+    puts("Vetor ordenado recebido.");
+    //printArray(*vetor, size);
 }
 
 int ordenarVetor(char *ip, int port, int **vetor, int tamanhoVetor) {
@@ -235,26 +258,64 @@ void initVetor() {
     srand(time(NULL));
 
     for (int i = 0; i < tamanhoVetor; i++) {
-        vetorInicial[i] = rand();
+        vetorInicial[i] = (rand() % tamanhoVetor) + 1;
+    }
+}
+
+int mergeVetor(char *ip, int port, int posicaoInicial, int quantidade) {
+    int *vetor;
+    int serversockfd = conectarServidor(ip, port);
+
+    memcpy(vetor, &vetorInicial[posicaoInicial], quantidade * sizeof(int));
+
+    enviarVetor(serversockfd, &vetor, quantidade);
+    receberVetor(serversockfd, &vetor, quantidade);
+
+    memcpy(&vetorInicial[posicaoInicial], vetor, quantidade * sizeof(int));
+
+    close(serversockfd);
+}
+
+void addToMerge(int **vetor, int tamanhoParticao, int posicao) {
+    int serverIndex = 0;
+
+    printf("Posicao %d: ", posicao);
+    //printArray(*vetor, tamanhoParticao);
+    memcpy(&vetorInicial[tamanhoParticao * posicao], *vetor, tamanhoParticao * sizeof(int));
+    //printArray(vetorInicial, tamanhoVetor);
+
+    if (posicao % 2 == 1) { // Segunda particao
+        if (serverIndex == amountMergeServer) {
+            serverIndex = 0;
+        }
+
+        printf("\nEnviando posicoes de %d a %d para merge...\n", tamanhoParticao * (posicao - 1),
+               (tamanhoParticao * (posicao - 1) + (tamanhoParticao * 2) - 1));
+        mergeVetor(servidoresMerge[serverIndex].ip, servidoresMerge[serverIndex].port,
+                   tamanhoParticao * (posicao - 1), tamanhoParticao * 2);
+
+        serverIndex++;
     }
 }
 
 void initSort() {
     int tamanhoParticao = (tamanhoVetor + 32 - 1) / 32;
-    int *abc[32];
+    int *particoesVetor[32];
     int serverIndex = 0;
 
     for (int i = 0; i < 32; i++) {
-        abc[i] = malloc(tamanhoParticao * sizeof(int));
-        memcpy(abc[i], vetorInicial + (tamanhoParticao * i), tamanhoParticao * sizeof(int));
+        particoesVetor[i] = malloc(tamanhoParticao * sizeof(int));
+        memcpy(particoesVetor[i], vetorInicial + (tamanhoParticao * i), tamanhoParticao * sizeof(int));
 
         if (serverIndex == amountSortServer) {
             serverIndex = 0;
         }
 
-        printf("\nEnviando vetor %d para ordenação...\n", i + 1);
+        printf("\nEnviando particao %d do vetor para ordenação...\n", i + 1);
         ordenarVetor(servidoresOrdenacao[serverIndex].ip, servidoresOrdenacao[serverIndex].port,
-                     &abc[i], tamanhoParticao);
+                     &particoesVetor[i], tamanhoParticao);
+
+        addToMerge(&particoesVetor[i], tamanhoParticao, i);
         serverIndex++;
     }
 }

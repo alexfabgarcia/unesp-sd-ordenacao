@@ -1,3 +1,3 @@
-tamanho.vetor=400
-servidores.ordenacao=192.168.1.103:9090
-servidores.merge=192.168.1.104:8088;192.168.1.104:8089
+tamanho.vetor=64
+servidores.ordenacao=192.168.1.100:9090;192.168.1.100:2000;192.168.1.104:9090;192.168.1.104:9091
+servidores.merge=192.168.1.100:7000

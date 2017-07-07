@@ -51,22 +51,30 @@ int receberVetor(int clientsockfd, int **vetor) {
         } else {
             puts("Aguardando vetor.");
             *vetor = (int*) malloc(tamanhoVetor * sizeof(int));
-            bytes_transfer = read(clientsockfd, *vetor, tamanhoVetor * sizeof(int));
 
-            if (bytes_transfer < 0) {
-                printf("Nenhum byte recebido.");
-            } else {
-                printf("Vetor recebido (%d bytes).\n", bytes_transfer);
+            for (int i = 0; i < tamanhoVetor; i += BUFFER_SIZE) {
+                bytes_transfer = posicoesVetor(tamanhoVetor, i);
 
-                puts("Enviando confirmacao de recebimento do vetor.");
-                bytes_transfer = write(clientsockfd, &ok, sizeof(int));
+                printf("Recebendo posicoes de %d a %d.\n", i, i + bytes_transfer);
+                bytes_transfer = read(clientsockfd, *vetor + i, bytes_transfer * sizeof(int));
 
                 if (bytes_transfer < 0) {
-                    puts("Nao foi possivel confirmar o recebimento do vetor.");
-                } else {
-                    puts("Confirmado o recebimento do vetor.\n");
-                    printArray(*vetor, tamanhoVetor);
+                    printf("Nenhum byte recebido.");
+                    *vetor = NULL;
+                    return 0;
                 }
+            }
+
+            printf("Vetor recebido (%d posicoes).\n", tamanhoVetor);
+
+            puts("Enviando confirmacao de recebimento do vetor.");
+            bytes_transfer = write(clientsockfd, &ok, sizeof(int));
+
+            if (bytes_transfer < 0) {
+                puts("Nao foi possivel confirmar o recebimento do vetor.");
+            } else {
+                puts("Confirmado o recebimento do vetor.\n");
+                //printArray(*vetor, tamanhoVetor);
             }
         }
     }
@@ -74,13 +82,21 @@ int receberVetor(int clientsockfd, int **vetor) {
     return tamanhoVetor;
 }
 
-void enviarVetor(int clientsockfd, int **vetor, int tamanhoVetor) {
-    int bytes_transfer = write(clientsockfd, *vetor, tamanhoVetor * sizeof(int));
+void enviarVetor(int sockfd, int **vetor, int size) {
+    int bytes_transfer;
 
-    if (bytes_transfer < 0) {
-        puts("Nao foi possivel enviar o vetor ordenado ao cliente.");
-    } else {
-        puts("Vetor ordenado foi enviado ao cliente.");
+    for (int i = 0; i < size; i += BUFFER_SIZE) {
+
+        // Calcula a quantidade para transferir
+        bytes_transfer = posicoesVetor(size, i);
+
+        printf("Enviando posicoes de %d a %d.\n", i, i + bytes_transfer);
+        bytes_transfer = write(sockfd, *vetor + i, bytes_transfer * sizeof(int));
+
+        if (bytes_transfer < 0) {
+            error("Nao foi possivel enviar o vetor ordenado ao cliente..");
+            return;
+        }
     }
 }
 
@@ -102,8 +118,8 @@ int *mergeVetoresOrdenados(int *vetorA, int sizeA, int *vetorB, int sizeB) {
 
 int main(int argc, char *argv[]) {
     int sockfd, newsockfd, porta, bytes_transfer;
-    int *vetorA, *vetorB, *vetorFinal;
-    int tamanhoVetorA, tamanhoVetorB;
+    int *vetor;
+    int tamanhoVetor;
     int ok = 1, erro = 0;
     socklen_t clilen;
     char buffer[BUFFER_SIZE];
@@ -148,13 +164,10 @@ int main(int argc, char *argv[]) {
 
         printf("\nRecebendo conexão de (%s, %d)\n", inet_ntoa(cli_addr.sin_addr), ntohs(cli_addr.sin_port));
 
-        puts("Recebendo primeiro vetor...");
-        tamanhoVetorA = receberVetor(newsockfd, &vetorA);
+        puts("Recebendo vetor...");
+        tamanhoVetor = receberVetor(newsockfd, &vetor);
 
-        puts("Recebendo segundo vetor...");
-        tamanhoVetorB = receberVetor(newsockfd, &vetorB);
-
-        vetorFinal = mergeVetoresOrdenados(vetorA, tamanhoVetorA, vetorB, tamanhoVetorB);
+        vetorFinal = mergeVetoresOrdenados(vetorA, tamanhoVetor, vetorB, tamanhoVetorB);
 
         enviarVetor(newsockfd, &vetorFinal, tamanhoVetorA + tamanhoVetorB);
 
