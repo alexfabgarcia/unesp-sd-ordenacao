@@ -10,7 +10,7 @@
 #include <netinet/in.h> // defines IP standard protocols
 #include <arpa/inet.h> // to convert host addresses
 
-#define BUFFER_SIZE 1024
+#define BUFFER_SIZE 256
 #define TRUE 1
 #define FALSE 0
 
@@ -29,6 +29,10 @@ void printArray(int arr[], int size) {
 void error(const char *msg) {
     perror(msg);
     exitWithFailure();
+}
+
+int posicoesVetor(int size, int posicao_atual) {
+    return ((size < BUFFER_SIZE) || (posicao_atual + BUFFER_SIZE) > size) ? size - posicao_atual : BUFFER_SIZE;
 }
 
 int receberVetor(int clientsockfd, int **vetor) {
@@ -100,20 +104,60 @@ void enviarVetor(int sockfd, int **vetor, int size) {
     }
 }
 
-int *mergeVetoresOrdenados(int *vetorA, int sizeA, int *vetorB, int sizeB) {
-    int size = sizeA + sizeB;
-    int posA = 0, posB = 0;
-    int *vetorFinal = malloc((sizeA + sizeB) * sizeof(int));
+// Merges two subarrays of arr[].
+// First subarray is arr[l..m]
+// Second subarray is arr[m+1..r]
+void merge(int arr[], int l, int m, int r)
+{
+    int i, j, k;
+    int n1 = m - l + 1;
+    int n2 =  r - m;
 
-    for (int i = 0; i < size; i++) {
-        if (vetorA[posA] < vetorB[posB]) {
-            vetorFinal[i] = vetorA[posA++];
-        } else {
-            vetorFinal[i] = vetorA[posB++];
+    /* create temp arrays */
+    int L[n1], R[n2];
+
+    /* Copy data to temp arrays L[] and R[] */
+    for (i = 0; i < n1; i++)
+        L[i] = arr[l + i];
+    for (j = 0; j < n2; j++)
+        R[j] = arr[m + 1+ j];
+
+    /* Merge the temp arrays back into arr[l..r]*/
+    i = 0; // Initial index of first subarray
+    j = 0; // Initial index of second subarray
+    k = l; // Initial index of merged subarray
+    while (i < n1 && j < n2)
+    {
+        if (L[i] <= R[j])
+        {
+            arr[k] = L[i];
+            i++;
         }
+        else
+        {
+            arr[k] = R[j];
+            j++;
+        }
+        k++;
     }
 
-    return vetorFinal;
+    /* Copy the remaining elements of L[], if there
+       are any */
+    while (i < n1)
+    {
+        arr[k] = L[i];
+        i++;
+        k++;
+    }
+
+    /* Copy the remaining elements of R[], if there
+       are any */
+    while (j < n2)
+    {
+        arr[k] = R[j];
+        j++;
+        k++;
+    }
 }
 
 int main(int argc, char *argv[]) {
@@ -167,9 +211,13 @@ int main(int argc, char *argv[]) {
         puts("Recebendo vetor...");
         tamanhoVetor = receberVetor(newsockfd, &vetor);
 
-        vetorFinal = mergeVetoresOrdenados(vetorA, tamanhoVetor, vetorB, tamanhoVetorB);
+        printArray(vetor, tamanhoVetor);
 
-        enviarVetor(newsockfd, &vetorFinal, tamanhoVetorA + tamanhoVetorB);
+        merge(vetor, 0, (tamanhoVetor - 1)/2, tamanhoVetor - 1);
+
+        printArray(vetor, tamanhoVetor);
+
+        enviarVetor(newsockfd, &vetor, tamanhoVetor);
 
         close(newsockfd);
     }

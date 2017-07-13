@@ -23,10 +23,10 @@
 /**
  * Constantes.
  */
-#define TAMANHO_PARTICAO_VETOR 32;
+#define TAMANHO_PARTICAO_VETOR 32
 #define TAMANHO_MIN_VETOR 64
-#define TAMANHO_MAX_VETOR 160000
-#define BUFFER_SIZE 1024
+#define TAMANHO_MAX_VETOR 1600000
+#define BUFFER_SIZE 256
 #define LENGTH_PROP_SERVER_ORD strlen("servidores.ordenacao")
 #define LENGTH_PROP_SERVER_MERGE strlen("servidores.merge")
 #define DELIMITADOR_SERVIDORES ";"
@@ -38,7 +38,17 @@
 typedef struct Server {
     char *ip;
     int port;
+    bool idle;
 } Server;
+
+typedef struct SortThread {
+    int *vetor;
+    int indiceVetor;
+    int tamanho;
+    int serversockfd;
+    int serverIndex;
+    bool ordenado;
+} SortThread;
 
 /**
  * Variaveis globais.
@@ -47,6 +57,12 @@ Server *servidoresOrdenacao = NULL, *servidoresMerge = NULL;
 int amountSortServer, amountMergeServer;
 int tamanhoVetor;
 int *vetorInicial;
+int particoesOrdenadas = 0;
+int mergeRealizado = 0;
+int quantidadeMerge = 0;
+SortThread vetoresOrdenacao[TAMANHO_PARTICAO_VETOR];
+pthread_mutex_t mutexParticao;
+
 
 void error(const char *msg) {
     perror(msg);
@@ -75,8 +91,8 @@ int conectarServidor(char *ip, int port) {
     }
 
     server = gethostbyname(ip);
-
     if (server == NULL) {
+        puts(ip);
         fprintf(stderr, "ERROR, no such host\n");
         exit(0);
     }
@@ -153,7 +169,7 @@ void receberVetor(int sockfd, int **vetor, int size) {
         bytes_transfer = read(sockfd, *vetor + i, bytes_transfer * sizeof(int));
 
         if (bytes_transfer < 0) {
-            printf("Nao foi possivel receber o vetor ordenado.");
+            printf("Nao foi possivel receber o vetor ordenado. Range de %d ate %d.\n", i, i + bytes_transfer);
             *vetor = NULL;
             return;
         }
@@ -163,14 +179,36 @@ void receberVetor(int sockfd, int **vetor, int size) {
     //printArray(*vetor, size);
 }
 
-int ordenarVetor(char *ip, int port, int **vetor, int tamanhoVetor) {
-    int serversockfd = conectarServidor(ip, port);
+void *ordenarVetor(void *args) {
+    SortThread *sortThread = args;
 
-    enviarVetor(serversockfd, &*vetor, tamanhoVetor);
+    printf("Thread info: indice %d, tamanho %d.", sortThread->indiceVetor, sortThread->tamanho);
 
-    receberVetor(serversockfd, &*vetor, tamanhoVetor);
+    enviarVetor(sortThread->serversockfd, &sortThread->vetor, sortThread->tamanho);
+    receberVetor(sortThread->serversockfd, &sortThread->vetor, sortThread->tamanho);
 
-    close(serversockfd);
+    close(sortThread->serversockfd);
+    printf("Socket %d closed.", sortThread->serversockfd);
+
+    pthread_mutex_lock(&mutexParticao);
+
+    servidoresOrdenacao[sortThread->serverIndex].idle = true;
+    sortThread->ordenado = true;
+
+    memcpy(&vetorInicial[sortThread->tamanho * particoesOrdenadas], sortThread->vetor,
+           sortThread->tamanho * sizeof(int));
+
+    particoesOrdenadas++;
+
+    if (particoesOrdenadas % 2 == 0) {
+        // MERGE
+    }
+
+    pthread_mutex_unlock(&mutexParticao);
+
+//                     &particoesVetor[i], tamanhoParticao);
+
+    //printf("Servidor %s:%d.\n", servidoresOrdenacao[index].ip, servidoresOrdenacao[index].port);
 }
 
 /**
@@ -243,6 +281,7 @@ Server *initServers(char *informacaoServidores, int amount) {
         serverAux = getServer(token);
         servidores[index].ip = serverAux->ip;
         servidores[index].port = serverAux->port;
+        servidores[index].idle = true;
         printf("%d - IP %s porta %d.\n", index + 1, servidores[index].ip, servidores[index].port);
         index++;
     }
@@ -251,7 +290,7 @@ Server *initServers(char *informacaoServidores, int amount) {
 }
 
 /**
- * Inicia o vetor com as os números inteiros aleatórios.
+ * Inicia o vetor com as os números inteiros aleatórios e divide as 32 partes.
  */
 void initVetor() {
     vetorInicial = malloc(tamanhoVetor * sizeof(int));
@@ -260,64 +299,118 @@ void initVetor() {
     for (int i = 0; i < tamanhoVetor; i++) {
         vetorInicial[i] = (rand() % tamanhoVetor) + 1;
     }
-}
 
-int mergeVetor(char *ip, int port, int posicaoInicial, int quantidade) {
-    int *vetor;
-    int serversockfd = conectarServidor(ip, port);
+    int tamanhoParticao = (tamanhoVetor + TAMANHO_PARTICAO_VETOR - 1) / TAMANHO_PARTICAO_VETOR;
 
-    memcpy(vetor, &vetorInicial[posicaoInicial], quantidade * sizeof(int));
+    for (int i = 0; i < TAMANHO_PARTICAO_VETOR; i++) {
+        vetoresOrdenacao[i].indiceVetor = i;
+        vetoresOrdenacao[i].vetor = malloc(tamanhoParticao * sizeof(int));
+        vetoresOrdenacao[i].tamanho = tamanhoParticao;
+        vetoresOrdenacao[i].ordenado = false;
 
-    enviarVetor(serversockfd, &vetor, quantidade);
-    receberVetor(serversockfd, &vetor, quantidade);
-
-    memcpy(&vetorInicial[posicaoInicial], vetor, quantidade * sizeof(int));
-
-    close(serversockfd);
-}
-
-void addToMerge(int **vetor, int tamanhoParticao, int posicao) {
-    int serverIndex = 0;
-
-    printf("Posicao %d: ", posicao);
-    //printArray(*vetor, tamanhoParticao);
-    memcpy(&vetorInicial[tamanhoParticao * posicao], *vetor, tamanhoParticao * sizeof(int));
-    //printArray(vetorInicial, tamanhoVetor);
-
-    if (posicao % 2 == 1) { // Segunda particao
-        if (serverIndex == amountMergeServer) {
-            serverIndex = 0;
-        }
-
-        printf("\nEnviando posicoes de %d a %d para merge...\n", tamanhoParticao * (posicao - 1),
-               (tamanhoParticao * (posicao - 1) + (tamanhoParticao * 2) - 1));
-        mergeVetor(servidoresMerge[serverIndex].ip, servidoresMerge[serverIndex].port,
-                   tamanhoParticao * (posicao - 1), tamanhoParticao * 2);
-
-        serverIndex++;
+        memcpy(vetoresOrdenacao[i].vetor, vetorInicial + (tamanhoParticao * i), tamanhoParticao * sizeof(int));
     }
+}
+
+void verificarMerge() {
+    pthread_mutex_lock(&mutexParticao);
+    if (particoesOrdenadas > 0 && particoesOrdenadas % 2 == 0) {
+        //printf("\nPoderia iniciar o merge pois ha %d particoes ordenadas.\n", particoesOrdenadas);
+    }
+    pthread_mutex_unlock(&mutexParticao);
+}
+
+void gravarVetorArquivo() {
+    puts("Gerando arquivo 'ordenado.txt' com o vetor ordenado.");
+
+    FILE *arquivoSaida = fopen("ordenado.txt", "w");
+
+    fprintf(arquivoSaida, "Vetor de tamanho %d ordenado:\n", tamanhoVetor);
+
+    for (int i = 0; i < tamanhoVetor; i++) {
+        fprintf(arquivoSaida, "Posicao[%d]: %d\n", i, vetorInicial[i]);
+    }
+
+    fclose(arquivoSaida);
 }
 
 void initSort() {
-    int tamanhoParticao = (tamanhoVetor + 32 - 1) / 32;
-    int *particoesVetor[32];
-    int serverIndex = 0;
+    int i = 0;
+    pthread_t threadOrdenacao[amountSortServer];
+    pthread_t threadMerge[amountMergeServer];
+    bool haParticaoDesordenada;
 
-    for (int i = 0; i < 32; i++) {
-        particoesVetor[i] = malloc(tamanhoParticao * sizeof(int));
-        memcpy(particoesVetor[i], vetorInicial + (tamanhoParticao * i), tamanhoParticao * sizeof(int));
+    pthread_mutex_init(&mutexParticao, NULL);
 
-        if (serverIndex == amountSortServer) {
-            serverIndex = 0;
+    while (particoesOrdenadas < TAMANHO_PARTICAO_VETOR) {
+        for (int serverIndex = 0; serverIndex < amountSortServer; serverIndex++) {
+            pthread_mutex_lock(&mutexParticao);
+            haParticaoDesordenada = particoesOrdenadas < TAMANHO_PARTICAO_VETOR;
+            pthread_mutex_unlock(&mutexParticao);
+
+            if (haParticaoDesordenada && servidoresOrdenacao[serverIndex].idle && !vetoresOrdenacao[i].ordenado) {
+                servidoresOrdenacao[serverIndex].idle = false;
+                vetoresOrdenacao[i].serversockfd = conectarServidor(servidoresOrdenacao[serverIndex].ip,
+                                                                    servidoresOrdenacao[serverIndex].port);
+                printf("Socket %d oppened.", vetoresOrdenacao[i].serversockfd);
+
+                vetoresOrdenacao[i].serverIndex = serverIndex;
+
+                pthread_create(&threadOrdenacao[serverIndex], NULL, ordenarVetor, &vetoresOrdenacao[i++]);
+            }
+
+            if (i == TAMANHO_PARTICAO_VETOR) {
+                i = 0;
+            }
+
+            verificarMerge();
+        }
+    }
+
+    int quantidadeParticaoMerge = TAMANHO_PARTICAO_VETOR / 2;
+    int tamanhoParticaoMerge  = 0;
+    int *vetorMerge;
+
+    while (true) {
+        for (int serverIndex = 0; serverIndex < amountMergeServer; serverIndex++) {
+            if (servidoresMerge[serverIndex].idle) {
+                servidoresMerge[serverIndex].idle = false;
+                i = conectarServidor(servidoresMerge[serverIndex].ip, servidoresMerge[serverIndex].port);
+
+                tamanhoParticaoMerge = tamanhoVetor / quantidadeParticaoMerge;
+
+                vetorMerge = malloc(tamanhoParticaoMerge * sizeof(int));
+                memcpy(vetorMerge, vetorInicial + (tamanhoParticaoMerge * mergeRealizado), tamanhoParticaoMerge *
+                        sizeof(int));
+
+                //printArray(vetorMerge, tamanhoParticaoMerge);
+
+                enviarVetor(i, &vetorMerge, tamanhoParticaoMerge);
+                receberVetor(i, &vetorMerge, tamanhoParticaoMerge);
+
+                //printArray(vetorMerge, tamanhoParticaoMerge);
+                memcpy(&vetorInicial[tamanhoParticaoMerge * mergeRealizado], vetorMerge, tamanhoParticaoMerge * sizeof(int));
+
+                close(i);
+                mergeRealizado++;
+
+                servidoresMerge[serverIndex].idle = true;
+
+                if (mergeRealizado == quantidadeParticaoMerge && quantidadeParticaoMerge == 1) {
+                    break;
+                }
+            }
         }
 
-        printf("\nEnviando particao %d do vetor para ordenação...\n", i + 1);
-        ordenarVetor(servidoresOrdenacao[serverIndex].ip, servidoresOrdenacao[serverIndex].port,
-                     &particoesVetor[i], tamanhoParticao);
-
-        addToMerge(&particoesVetor[i], tamanhoParticao, i);
-        serverIndex++;
+        if (mergeRealizado == quantidadeParticaoMerge && quantidadeParticaoMerge == 1) {
+            break;
+        } else if (mergeRealizado == quantidadeParticaoMerge) {
+            quantidadeParticaoMerge = quantidadeParticaoMerge / 2;
+            mergeRealizado = 0;
+        }
     }
+
+    gravarVetorArquivo();
 }
 
 /**

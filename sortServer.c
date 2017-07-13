@@ -10,7 +10,7 @@
 #include <netinet/in.h> // defines IP standard protocols
 #include <arpa/inet.h> // to convert host addresses
 
-#define BUFFER_SIZE 1024
+#define BUFFER_SIZE 256
 #define TRUE 1
 #define FALSE 0
 
@@ -149,10 +149,6 @@ int main(int argc, char *argv[]) {
     if (sockfd < 0) {
         error("[Erro] Nao foi possivel abrir o socket");
     }
-
-//    if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &1, sizeof(int)) == -1) {
-//        error("[Erro] Setsockopt");
-//    }
 
     bzero((char *) &serv_addr, sizeof(serv_addr));
     porta = atoi(argv[1]);
